@@ -87,94 +87,14 @@ void set_blocking (int fd, int should_block)
 }
 
 
-void read_8_bytes(int fd, double* commands){
-    unsigned char buf8[SERIAL_DATA_SIZE];
-    unsigned char buf;
-    printf("reading\n");
-    while(1){
-        int n = read (fd, &buf, 1);
-        
-        if (n != 1) {
-            printf("READ: n is not 1, n is: %d\n", n);
-        }
-        else{
-            printf("READ: char read: %x\n", buf); 
-            if (buf == 0xCC){
-                int i;
-//              for (i = 0 ; i < SERIAL_DATA_SIZE ; i++)
-//              {
-                    n = read (fd, &buf8, SERIAL_DATA_SIZE);
-                    printf("READ: n is: %d\n", n);
-//                  buf8[i] = buf;
-//              }
-                printf("READ: recieved bytes:\n");
-
-//              for ( i = 0; i < SERIAL_DATA_SIZE; i++)
-//              {
-//                  printf("READ: %x\n",buf8[i]);
-//              }   
-
-                break;
-
-            }
-
-        }
-
-    }
-
-    int vol_left = *(int*)buf8;
-    int vol_right = *(int*) &buf8[4];
-    
-    printf("vol left : %d \n", vol_left);   
-
-    commands[0] = ((double) vol_left)/10000.0;
-    commands[1] = ((double) vol_right)/10000.0;
-
-}
-
-void send_serial(int fd, int sensor_readings[]){
-    printf("sending\n");
-    unsigned char Txbuffer[13];
-    int i;
-    unsigned char buf;
-
-    for (i = 0; i < 2; i ++ ) {
-        Txbuffer[4*i]            = (unsigned char) (sensor_readings[i] & 0xff); /* first byte */
-        Txbuffer[4*i + 1]          = (unsigned char) (sensor_readings[i] >> 8  & 0xff); /* second byte */
-        Txbuffer[4*i + 2]          = (unsigned char) (sensor_readings[i] >> 16 & 0xff); /* third byte */
-        Txbuffer[4*i + 3]          = (unsigned char) (sensor_readings[i] >> 24 & 0xff); /* fourth byte */
-    }
-    unsigned char start = 0xAA;
-    Txbuffer[8] = 0xFF;
-
-    int max_loop = 10; 
-    int loop_count = 0;
-    while (loop_count < max_loop){
-        loop_count++;
-        printf("SEND: in the while loop. loop_count = %d\n", loop_count);
-        write(fd, &start, 1);
-        
-        int n = read (fd, &buf, 1);
-        if (n == 1) {
-            printf("SEND: char is: %x\n", buf);
-            if (buf == 0xBB){
-                printf("SEND: I recieved BB\n");
-                write(fd, Txbuffer, 9);
-                usleep (5000);             // sleep enough to transmit the 7 plus
-                printf("SEND: data is written.\n");
-                break;
-            }
-        }
-    }
-    
-
-}
 
 /* plant simulation  */
 void  cartpole_ode(double* x,double* u)
 {
     double dxdt[sDIM], dxdt1[sDIM], dxdt2[sDIM], dxdt3[sDIM],tmp[sDIM],h;
     int t, i;
+
+
     h=tau/5;
     
     for(t=0; t<5; t++) {
@@ -204,13 +124,111 @@ void  cartpole_ode(double* x,double* u)
 
 int main(void){ 
 	int i, nSteps=100;
-	/* initial state (starting point for simulation)*/
+
+    char *portname = "/dev/ttyACM0";
+    int fd = open (portname, O_RDWR | O_NOCTTY | O_SYNC);
+    if (fd < 0)
+    {
+        printf("error %d opening %s: %s\n", errno, portname, strerror (errno));
+        return;
+    }
+
+    set_interface_attribs (fd, B115200, 0);  // set speed to 115,200 bps, 8n1 (no parity)
+    set_blocking (fd, 0);                // set no blocking
+
+
+    /* .. Writing the control values to the left and write motor......*/
+
+    int step = 0;
+    double vol_step = 0.1;  
+
+    int sensor_reading[3];
+
+
+
+    unsigned char buf8[SERIAL_DATA_SIZE];
+    unsigned char buf;
+    printf("reading\n");
+
+        /* initial state (starting point for simulation)*/
     x[0]=3.0; x[1]=0.0;
    /* send it to the board via serial to get control action  and store it in u*/
-   for(i=0;i<=nSteps;i++){
-		cartpole_ode(x,u);   //plant
-	/* get updated states in x and again send it to the board via serial to get control action and store it in u (every 50 ms) */	
-	/* it continues till nSteps times */
-   }
-}
 
+
+
+   for(i=0;i<=nSteps;i++){
+        cartpole_ode(x,u);   //plant
+    /* get updated states in x and again send it to the board via serial to get control action and store it in u (every 50 ms) */   
+    /* it continues till nSteps times */
+   }
+
+   sensor_reading[0] = x[0]*10000.0;
+   sensor_reading[1] = x[1]*10000.0;
+
+
+    while(1){
+
+        int n = read (fd, &buf, 1);
+        
+        if (n != 1) {
+            printf("READ: n is not 1, n is: %d\n", n);
+        }
+        else{
+            printf("READ: char read: %x\n", buf); 
+            if (buf == 0xDD){
+                //board is sending data to PC
+                
+                int i;
+                n = read (fd, &buf8, SERIAL_DATA_SIZE);
+                printf("READ: n is: %d\n", n);
+                printf("READ: recieved bytes:\n");
+                
+                int vol_left = *(int*)buf8;
+                int vol_right = *(int*) &buf8[4];
+                
+                printf("vol left : %d \n", vol_left);   
+
+                vol_left = ((double) vol_left)/10000.0;
+                vol_right = ((double) vol_right)/10000.0;               
+                
+            }
+            else if (buf == 0xCC){
+                // When the board requests the sensor data from PC
+    
+                unsigned char Txbuffer[13];
+                int i;
+                unsigned char buf_w;
+
+                for (i = 0; i < 2; i ++ ) {
+                    Txbuffer[4*i]              = (unsigned char) (sensor_reading[i] & 0xff); /* first byte */
+                    Txbuffer[4*i + 1]          = (unsigned char) (sensor_reading[i] >> 8  & 0xff); /* second byte */
+                    Txbuffer[4*i + 2]          = (unsigned char) (sensor_reading[i] >> 16 & 0xff); /* third byte */
+                    Txbuffer[4*i + 3]          = (unsigned char) (sensor_reading[i] >> 24 & 0xff); /* fourth byte */
+                }
+
+                unsigned char start = 0xAA;
+                Txbuffer[8] = 0xFF;
+
+                int max_loop = 10; 
+                int loop_count = 0;
+                while (loop_count < max_loop){
+                    loop_count++;
+                    printf("SEND: in the while loop. loop_count = %d\n", loop_count);
+                    write(fd, &start, 1);
+                    
+                    int n = read (fd, &buf_w, 1);
+                    if (n == 1) {
+                        printf("SEND: char is: %x\n", buf_w);
+                        if (buf == 0xBB){
+                            printf("SEND: I recieved BB\n");
+                            write(fd, Txbuffer, 9);
+                            usleep (5000);             // sleep enough to transmit the 7 plus
+                            printf("SEND: data is written.\n");
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
