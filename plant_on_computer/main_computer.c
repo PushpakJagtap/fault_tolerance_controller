@@ -2,6 +2,9 @@
 #include <stdio.h>
 #include <math.h>
 
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 /* state space dim */
 #define sDIM 2
@@ -20,6 +23,152 @@ const double tau = 0.05;
 const double omega=1;
 const double ga=0.0125;
 
+
+#define SERIAL_DATA_SIZE 9
+#define MAX_VOLTAGE 2 //TODO change this later to 3
+
+int set_interface_attribs (int fd, int speed, int parity)
+{
+
+    struct termios tty;
+    memset (&tty, 0, sizeof tty);
+    if (tcgetattr (fd, &tty) != 0)
+    {
+        //                printf("error %d from tcgetattr", errno);
+        return -1;
+    }
+
+    cfsetospeed (&tty, speed);
+    cfsetispeed (&tty, speed);
+
+    tty.c_cflag = (tty.c_cflag & ~CSIZE) | CS8;     // 8-bit chars
+    // disable IGNBRK for mismatched speed tests; otherwise receive break
+    // as \000 chars
+    tty.c_iflag &= ~IGNBRK;         // disable break processing
+    tty.c_lflag = 0;                // no signaling chars, no echo,
+    // no canonical processing
+    tty.c_oflag = 0;                // no remapping, no delays
+    tty.c_cc[VMIN]  = 0;            // read doesn't block
+    tty.c_cc[VTIME] = 5;            // 0.5 seconds read timeout
+
+    tty.c_iflag &= ~(IXON | IXOFF | IXANY); // shut off xon/xoff ctrl
+
+    tty.c_cflag |= (CLOCAL | CREAD);// ignore modem controls,
+    // enable reading
+    tty.c_cflag &= ~(PARENB | PARODD);      // shut off parity
+    tty.c_cflag |= parity;
+    tty.c_cflag &= ~CSTOPB;
+    tty.c_cflag &= ~CRTSCTS;
+
+    if (tcsetattr (fd, TCSANOW, &tty) != 0)
+    {
+        //printf("error %d from tcsetattr", errno);
+        return -1;
+    }
+    return 0;
+}
+
+void set_blocking (int fd, int should_block)
+{
+    struct termios tty;
+    memset (&tty, 0, sizeof tty);
+    if (tcgetattr (fd, &tty) != 0)
+    {
+        //printf("error %d from tggetattr", errno);
+        return;
+    }
+
+    tty.c_cc[VMIN]  = should_block ? 8 : 0;
+    tty.c_cc[VTIME] = 5;            // 0.5 seconds read timeout
+
+    if (tcsetattr (fd, TCSANOW, &tty) != 0){
+        //printf("error %d setting term attributes", errno);
+    }
+}
+
+
+void read_8_bytes(int fd, double* commands){
+    unsigned char buf8[SERIAL_DATA_SIZE];
+    unsigned char buf;
+    printf("reading\n");
+    while(1){
+        int n = read (fd, &buf, 1);
+        
+        if (n != 1) {
+            printf("READ: n is not 1, n is: %d\n", n);
+        }
+        else{
+            printf("READ: char read: %x\n", buf); 
+            if (buf == 0xCC){
+                int i;
+//              for (i = 0 ; i < SERIAL_DATA_SIZE ; i++)
+//              {
+                    n = read (fd, &buf8, SERIAL_DATA_SIZE);
+                    printf("READ: n is: %d\n", n);
+//                  buf8[i] = buf;
+//              }
+                printf("READ: recieved bytes:\n");
+
+//              for ( i = 0; i < SERIAL_DATA_SIZE; i++)
+//              {
+//                  printf("READ: %x\n",buf8[i]);
+//              }   
+
+                break;
+
+            }
+
+        }
+
+    }
+
+    int vol_left = *(int*)buf8;
+    int vol_right = *(int*) &buf8[4];
+    
+    printf("vol left : %d \n", vol_left);   
+
+    commands[0] = ((double) vol_left)/10000.0;
+    commands[1] = ((double) vol_right)/10000.0;
+
+}
+
+void send_serial(int fd, int sensor_readings[]){
+    printf("sending\n");
+    unsigned char Txbuffer[13];
+    int i;
+    unsigned char buf;
+
+    for (i = 0; i < 2; i ++ ) {
+        Txbuffer[4*i]            = (unsigned char) (sensor_readings[i] & 0xff); /* first byte */
+        Txbuffer[4*i + 1]          = (unsigned char) (sensor_readings[i] >> 8  & 0xff); /* second byte */
+        Txbuffer[4*i + 2]          = (unsigned char) (sensor_readings[i] >> 16 & 0xff); /* third byte */
+        Txbuffer[4*i + 3]          = (unsigned char) (sensor_readings[i] >> 24 & 0xff); /* fourth byte */
+    }
+    unsigned char start = 0xAA;
+    Txbuffer[8] = 0xFF;
+
+    int max_loop = 10; 
+    int loop_count = 0;
+    while (loop_count < max_loop){
+        loop_count++;
+        printf("SEND: in the while loop. loop_count = %d\n", loop_count);
+        write(fd, &start, 1);
+        
+        int n = read (fd, &buf, 1);
+        if (n == 1) {
+            printf("SEND: char is: %x\n", buf);
+            if (buf == 0xBB){
+                printf("SEND: I recieved BB\n");
+                write(fd, Txbuffer, 9);
+                usleep (5000);             // sleep enough to transmit the 7 plus
+                printf("SEND: data is written.\n");
+                break;
+            }
+        }
+    }
+    
+
+}
 
 /* plant simulation  */
 void  cartpole_ode(double* x,double* u)
