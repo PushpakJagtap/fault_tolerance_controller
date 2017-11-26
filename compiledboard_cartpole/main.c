@@ -119,7 +119,7 @@ double Hx[HX_SIZE][2] = {
 
 /* Modified for cartpole */
 double hx[HX_SIZE][1] = {
-{-2.4800},
+{-2.4000},
 {3.8400},
 {0.9000},
 {0.9000},
