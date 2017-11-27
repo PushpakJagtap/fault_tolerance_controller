@@ -1,4 +1,5 @@
 
+
 #include <stdio.h>
 #include <math.h>
 
@@ -25,7 +26,7 @@ const double ga=0.0125;
 
 
 #define SERIAL_DATA_SIZE 9
-#define MAX_VOLTAGE 2 //TODO change this later to 3
+#define MAX_CONTROL 4 //TODO change this later to 3
 
 int set_interface_attribs (int fd, int speed, int parity)
 {
@@ -123,8 +124,8 @@ void  cartpole_ode(double* x,double* u)
 }
 
 int main(void){ 
-	int i, nSteps=100;
-
+	int i, nSteps=100, cont;
+    double u[iDIM];
     char *portname = "/dev/ttyACM0";
     int fd = open (portname, O_RDWR | O_NOCTTY | O_SYNC);
     if (fd < 0)
@@ -137,12 +138,9 @@ int main(void){
     set_blocking (fd, 0);                // set no blocking
 
 
-    /* .. Writing the control values to the left and write motor......*/
-
     int step = 0;
-    double vol_step = 0.1;  
 
-    int sensor_reading[3];
+    int sensor_reading[2];
 
 
 
@@ -150,21 +148,8 @@ int main(void){
     unsigned char buf;
     printf("reading\n");
 
-        /* initial state (starting point for simulation)*/
+    /* initial state (starting point for simulation)*/
     x[0]=3.0; x[1]=0.0;
-   /* send it to the board via serial to get control action  and store it in u*/
-
-
-
-   for(i=0;i<=nSteps;i++){
-        cartpole_ode(x,u);   //plant
-    /* get updated states in x and again send it to the board via serial to get control action and store it in u (every 50 ms) */   
-    /* it continues till nSteps times */
-   }
-
-   sensor_reading[0] = x[0]*10000.0;
-   sensor_reading[1] = x[1]*10000.0;
-
 
     while(1){
 
@@ -183,17 +168,19 @@ int main(void){
                 printf("READ: n is: %d\n", n);
                 printf("READ: recieved bytes:\n");
                 
-                int vol_left = *(int*)buf8;
-                int vol_right = *(int*) &buf8[4];
+                int cont = *(int*)buf8;
                 
-                printf("vol left : %d \n", vol_left);   
+                printf("controller : %d \n", cont);
 
-                vol_left = ((double) vol_left)/10000.0;
-                vol_right = ((double) vol_right)/10000.0;               
+                cont = ((double) cont)/10000.0;
                 
             }
             else if (buf == 0xCC){
                 // When the board requests the sensor data from PC
+                u[0]= cont;
+                cartpole_ode(x,u);  //this will update the value of x i.e. sensor reading using control input from previous loop
+                sensor_reading[0] = x[0]*10000.0;
+                sensor_reading[1] = x[1]*10000.0;
     
                 unsigned char Txbuffer[13];
                 int i;
