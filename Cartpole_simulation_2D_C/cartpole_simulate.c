@@ -1,5 +1,5 @@
 /*
- * cartpole_simulate.cc
+ * cartpole_simulate.c
  *
  *  created on: 19.11.2017
  *      author: pushpak
@@ -108,7 +108,7 @@ int main() {
         }
         /* getting control input from controller */
         uInt = getControlAction(xx);
-        u[0]= -3.5+uInt*0.1;
+        u[0]= -3+uInt*0.1;
         cartpole_ode(x,u);
     }
     return 1;
