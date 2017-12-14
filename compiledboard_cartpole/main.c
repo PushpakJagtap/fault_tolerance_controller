@@ -88,7 +88,7 @@ static void UART_ReceiveDataPolling(UART_Type *base, uint8_t *rxBuff, uint32_t r
 #define PERIOD        	0.05
 #define RESTART_TIME  	0.3
 
-#define MAX_CONTROL		3.5
+#define MAX_CONTROL		3.0
 
     // Setup UART init structure.
 uart_init_config_t initConfig = {
@@ -328,7 +328,7 @@ double compute_safe_controller(struct state x){
         }
         /* getting control input from controller */
         uInt = getControlAction(xx);
-        u[0]= -3.5+uInt*0.1;
+        u[0]= -MAX_CONTROL+uInt*0.1;
         return u[0];
 }
 
